@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
-
-type BenchmarkKey = "investidor" | "populacao";
-type ScenarioKey = "pessimista" | "base" | "otimista" | "personalizado";
-type ContributionIndexation = "inflationAdjusted" | "fixedNominal";
-type ContributionTiming = "end" | "begin";
+import {
+  annualToMonthlyRate,
+  monthsToTarget,
+  parseNumberBR,
+  realMonthlyRateFromGross,
+  simulateProjection,
+  solveRequiredPmt,
+} from "./lib/finance";
+import type {
+  BenchmarkKey,
+  ContributionIndexation,
+  ContributionTiming,
+  ScenarioKey,
+  SimulationPoint,
+} from "./lib/finance";
 type DisplayMode = "real" | "nominal";
 type PresetPayload = {
   benchmarkKey: BenchmarkKey;
@@ -84,20 +94,6 @@ const brl2 = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 2,
 });
 
-function parseNumberBR(value: string): number {
-  const v = value
-    .trim()
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^\d.-]/g, "");
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function clamp(n: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, n));
-}
-
 function loadPresetsFromStorage(): Preset[] {
   if (typeof localStorage === "undefined") return [];
   try {
@@ -121,206 +117,6 @@ function persistPresets(list: Preset[]) {
   }
 }
 
-function annualToMonthlyRate(annualRate: number): number {
-  // (1 + a)^(1/12) - 1
-  if (annualRate <= -1) return -0.999999;
-  return Math.pow(1 + annualRate, 1 / 12) - 1;
-}
-
-/**
- * “Imposto efetivo” simples:
- * - desconta imposto como % do ganho mensal (aproximação)
- * - depois converte de nominal -> real, descontando inflação
- */
-function realMonthlyRateFromGross(params: {
-  grossMonthlyRate: number; // ex: 0.01
-  taxOnGainsRate: number; // ex: 0.15
-  inflationMonthlyRate: number; // ex: 0.003
-}) {
-  const g = params.grossMonthlyRate;
-  const tax = clamp(params.taxOnGainsRate, 0, 1);
-  const infl = params.inflationMonthlyRate;
-
-  const netNominal = 1 + g * (1 - tax);
-  const real = netNominal / (1 + infl) - 1;
-
-  return clamp(real, -0.99, 10);
-}
-
-type SimulationPoint = {
-  month: number;
-  age: number;
-  inflFactor: number;
-  balanceReal: number;
-  balanceNominal: number;
-  contributionNominal: number;
-  contributionReal: number;
-};
-
-function simulateProjection(params: {
-  pvToday: number; // valor de hoje
-  pmt0: number; // “R$ de hoje”: se fixedNominal, é nominal fixo; se inflationAdjusted, é valor real constante reajustado
-  months: number;
-  ageNow: number;
-
-  // taxas
-  realMonthlyRate: number;
-  inflationMonthlyRate: number;
-
-  // aporte
-  indexation: ContributionIndexation;
-  timing: ContributionTiming;
-}) {
-  const {
-    pvToday,
-    pmt0,
-    months,
-    ageNow,
-    realMonthlyRate: r,
-    inflationMonthlyRate: inflM,
-    indexation,
-    timing,
-  } = params;
-
-  const points: SimulationPoint[] = [];
-
-  let balanceReal = Math.max(0, pvToday);
-
-  for (let m = 0; m <= months; m++) {
-    const inflFactor = Math.pow(1 + inflM, m);
-
-    // contribuição do mês m (pensada “no mês m”)
-    // - inflationAdjusted: contribuição real constante = pmt0; nominal cresce com inflação
-    // - fixedNominal: nominal constante = pmt0; real diminui com inflação
-    const contributionNominal =
-      indexation === "inflationAdjusted" ? pmt0 * inflFactor : pmt0;
-
-    const contributionReal =
-      indexation === "inflationAdjusted" ? pmt0 : pmt0 / inflFactor;
-
-    const balanceNominal = balanceReal * inflFactor;
-
-    points.push({
-      month: m,
-      age: ageNow + m / 12,
-      inflFactor,
-      balanceReal,
-      balanceNominal,
-      contributionNominal,
-      contributionReal,
-    });
-
-    // não aplica dinâmica no último ponto (é só snapshot)
-    if (m === months) break;
-
-    // aplica a dinâmica do próximo mês
-    if (timing === "begin") {
-      balanceReal += contributionReal;
-      balanceReal *= 1 + r;
-    } else {
-      balanceReal *= 1 + r;
-      balanceReal += contributionReal;
-    }
-
-    if (!Number.isFinite(balanceReal)) break;
-  }
-
-  return points;
-}
-
-function finalBalanceReal(params: {
-  pvToday: number;
-  pmt0: number;
-  months: number;
-  ageNow: number;
-  realMonthlyRate: number;
-  inflationMonthlyRate: number;
-  indexation: ContributionIndexation;
-  timing: ContributionTiming;
-}) {
-  const pts = simulateProjection(params);
-  return pts.length ? pts[pts.length - 1].balanceReal : NaN;
-}
-
-function monthsToTarget(params: {
-  pvToday: number;
-  pmt0: number;
-  targetToday: number;
-  ageNow: number;
-  realMonthlyRate: number;
-  inflationMonthlyRate: number;
-  indexation: ContributionIndexation;
-  timing: ContributionTiming;
-  maxMonths?: number;
-}) {
-  const maxMonths = params.maxMonths ?? 2400; // 200 anos
-  if (params.targetToday <= params.pvToday) return 0;
-
-  // simula até atingir
-  let balanceReal = Math.max(0, params.pvToday);
-  for (let m = 1; m <= maxMonths; m++) {
-    const inflFactorPrev = Math.pow(1 + params.inflationMonthlyRate, m - 1);
-
-    const contributionReal =
-      params.indexation === "inflationAdjusted"
-        ? params.pmt0
-        : params.pmt0 / inflFactorPrev;
-
-    if (params.timing === "begin") {
-      balanceReal += contributionReal;
-      balanceReal *= 1 + params.realMonthlyRate;
-    } else {
-      balanceReal *= 1 + params.realMonthlyRate;
-      balanceReal += contributionReal;
-    }
-
-    if (!Number.isFinite(balanceReal)) return null;
-    if (balanceReal >= params.targetToday) return m;
-  }
-  return null;
-}
-
-function solveRequiredPmt(params: {
-  pvToday: number;
-  targetToday: number;
-  months: number;
-  ageNow: number;
-  realMonthlyRate: number;
-  inflationMonthlyRate: number;
-  indexation: ContributionIndexation;
-  timing: ContributionTiming;
-}) {
-  const { pvToday, targetToday, months } = params;
-  if (months <= 0) return null;
-  if (targetToday <= pvToday) return 0;
-
-  // função monotônica: quanto maior pmt0, maior saldo final
-  const reaches = (pmt0: number) => {
-    const end = finalBalanceReal({ ...params, pmt0 });
-    return Number.isFinite(end) && end >= targetToday;
-  };
-
-  let low = 0;
-  let high = Math.max(1, (targetToday - pvToday) / months);
-
-  // expande high até atingir ou até ficar absurdo
-  let guard = 0;
-  while (!reaches(high) && guard < 60) {
-    high *= 2;
-    if (high > 1e9) return null;
-    guard++;
-  }
-
-  // binary search
-  for (let i = 0; i < 70; i++) {
-    const mid = (low + high) / 2;
-    if (reaches(mid)) high = mid;
-    else low = mid;
-  }
-
-  return Math.max(0, high);
-}
-
 function pct(n: number, digits = 2) {
   return `${n.toFixed(digits)}%`;
 }
@@ -328,12 +124,7 @@ function pct(n: number, digits = 2) {
 function InfoTooltip(props: { text: string; label?: string }) {
   const { text, label = "?" } = props;
   return (
-    <span
-      className="infoTooltip"
-      role="tooltip"
-      aria-label={text}
-      tabIndex={0}
-    >
+    <span className="infoTooltip" role="tooltip" aria-label={text} tabIndex={0}>
       <span aria-hidden>{label}</span>
       <span className="infoTooltipBubble">{text}</span>
     </span>
@@ -446,9 +237,7 @@ function LineChart(props: {
           </div>
           <div className="chartTooltipBody">
             <span>Idade ~{props.data[hoverIdx].age.toFixed(1)}</span>
-            <span>
-              Saldo {fmt(values[hoverIdx])}
-            </span>
+            <span>Saldo {fmt(values[hoverIdx])}</span>
           </div>
         </div>
       )}
@@ -495,7 +284,9 @@ export default function App() {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("real");
 
   // Presets
-  const [presets, setPresets] = useState<Preset[]>(() => loadPresetsFromStorage());
+  const [presets, setPresets] = useState<Preset[]>(() =>
+    loadPresetsFromStorage()
+  );
   const [presetName, setPresetName] = useState("");
 
   useEffect(() => {
@@ -819,11 +610,8 @@ export default function App() {
 
   const summaryText = useMemo(() => {
     const aporteText =
-      aporteNecessario == null
-        ? "—"
-        : `${brl2.format(aporteNecessario)} / mês`;
-    const idadeText =
-      idadeAlvo == null ? "—" : `${idadeAlvo.toFixed(1)} anos`;
+      aporteNecessario == null ? "—" : `${brl2.format(aporteNecessario)} / mês`;
+    const idadeText = idadeAlvo == null ? "—" : `${idadeAlvo.toFixed(1)} anos`;
     return [
       `Aporte sugerido: ${aporteText}`,
       `Chega em: idade ${idadeText}`,
@@ -973,8 +761,8 @@ export default function App() {
                 placeholder="Usar renda do benchmark se vazio"
               />
               <small>
-                Se deixar em branco, usa a renda do benchmark selecionado
-                ({brl0.format(b.income)}).
+                Se deixar em branco, usa a renda do benchmark selecionado (
+                {brl0.format(b.income)}).
               </small>
             </label>
 
@@ -1243,8 +1031,7 @@ export default function App() {
 
             <div className="kpiRow">
               <span>
-                Aporte médio
-                {" "}
+                Aporte médio{" "}
                 {usandoRendaDoBenchmark
                   ? "(renda do benchmark)"
                   : "(sua renda)"}
@@ -1291,18 +1078,19 @@ export default function App() {
             <div>
               <div className="summaryTitle">Resumo executivo</div>
               <p className="summaryText">
-                Aporte sugerido: {" "}
+                Aporte sugerido:{" "}
                 <b>
                   {aporteNecessario == null
                     ? "—"
                     : `${brl2.format(aporteNecessario)} / mês`}
                 </b>
                 <br />
-                Chega em: idade {" "}
+                Chega em: idade{" "}
                 <b>{idadeAlvo == null ? "—" : `${idadeAlvo.toFixed(1)}`}</b>
                 <br />
-                Cenário: {scenarioLabel} | Inflação: {inflacaoAnualPct.toFixed(1)}%
-                {" "}| Imposto: {impostoEfetivoPct.toFixed(1)}%
+                Cenário: {scenarioLabel} | Inflação:{" "}
+                {inflacaoAnualPct.toFixed(1)}% | Imposto:{" "}
+                {impostoEfetivoPct.toFixed(1)}%
               </p>
             </div>
             <button className="btn" onClick={copySummary}>
@@ -1442,9 +1230,7 @@ export default function App() {
           <div className="assumptionBlock">
             <div className="assumptionTitle">
               Como calculamos
-              <InfoTooltip
-                text="Pipeline básico: pegamos a taxa bruta, descontamos um imposto efetivo constante, chegamos ao retorno nominal e, por fim, abatemos inflação para obter o retorno real."
-              />
+              <InfoTooltip text="Pipeline básico: pegamos a taxa bruta, descontamos um imposto efetivo constante, chegamos ao retorno nominal e, por fim, abatemos inflação para obter o retorno real." />
             </div>
 
             <div className="calcFlow">
@@ -1483,9 +1269,7 @@ export default function App() {
           <div className="assumptionBlock">
             <div className="assumptionTitle">
               “Aporte reajustado”
-              <InfoTooltip
-                text="Quando você marca 'Sim', o valor de hoje é corrigido pela inflação ao longo dos meses para preservar o poder de compra. Em 'Não', o valor fica nominal fixo e vale menos em termos reais."
-              />
+              <InfoTooltip text="Quando você marca 'Sim', o valor de hoje é corrigido pela inflação ao longo dos meses para preservar o poder de compra. Em 'Não', o valor fica nominal fixo e vale menos em termos reais." />
             </div>
             <p className="muted">
               Opção "Sim" = aporte acompanha a inflação (valor real constante).
@@ -1496,9 +1280,7 @@ export default function App() {
           <div className="assumptionBlock">
             <div className="assumptionTitle">
               Começo vs fim do mês
-              <InfoTooltip
-                text="Aporte no começo rende o mês inteiro. No fim, primeiro capitaliza o saldo existente e só depois entra o aporte."
-              />
+              <InfoTooltip text="Aporte no começo rende o mês inteiro. No fim, primeiro capitaliza o saldo existente e só depois entra o aporte." />
             </div>
             <p className="muted">
               No começo do mês, cada aporte ganha um mês a mais de juros. No fim
@@ -1509,9 +1291,7 @@ export default function App() {
           <div className="assumptionBlock">
             <div className="assumptionTitle">
               O que o modelo não cobre
-              <InfoTooltip
-                text="Usamos taxas constantes e uma alíquota efetiva única. Não há simulação de risco, variação de preços ou custos específicos."
-              />
+              <InfoTooltip text="Usamos taxas constantes e uma alíquota efetiva única. Não há simulação de risco, variação de preços ou custos específicos." />
             </div>
             <ul className="assumptionsList">
               <li>Volatilidade e oscilações de rentabilidade.</li>

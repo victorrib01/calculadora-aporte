@@ -4,7 +4,12 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["vite/client"],
+    "typeRoots": ["./src/types", "./node_modules/@types"],
+    "paths": {
+      "vitest": ["./src/types/vitest"],
+      "vitest/config": ["./src/types/vitest"],
+      "vite/client": ["./src/types/vite-client"]
+    },
     "skipLibCheck": true,
 
     /* Bundler mode */

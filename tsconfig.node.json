@@ -4,6 +4,12 @@
     "lib": ["ES2023"],
     "module": "ESNext",
     "types": ["node"],
+    "typeRoots": ["./src/types", "./node_modules/@types"],
+    "paths": {
+      "vitest": ["./src/types/vitest"],
+      "vitest/config": ["./src/types/vitest"],
+      "vite/client": ["./src/types/vite-client"]
+    },
     "skipLibCheck": true,
 
     /* Bundler mode */
