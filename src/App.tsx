@@ -341,13 +341,18 @@ function InfoTooltip(props: { text: string; label?: string }) {
 }
 
 function LineChart(props: {
-  points: number[];
+  data: SimulationPoint[];
+  displayMode: DisplayMode;
+  targetValue?: number | null;
   height?: number;
   formatY?: (v: number) => string;
+  highlightIndex?: number | null;
 }) {
   const height = props.height ?? 180;
   const width = 900; // viewBox “fixo”
-  const values = props.points;
+  const values = props.data.map((p) =>
+    props.displayMode === "real" ? p.balanceReal : p.balanceNominal
+  );
 
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -370,15 +375,83 @@ function LineChart(props: {
 
   const fmt = props.formatY ?? ((v: number) => brl0.format(v));
 
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
+  const targetY =
+    props.targetValue != null && Number.isFinite(props.targetValue)
+      ? toY(props.targetValue)
+      : null;
+
+  const highlightX =
+    props.highlightIndex != null && values[props.highlightIndex] != null
+      ? toX(props.highlightIndex)
+      : null;
+
   return (
     <div className="chartWrap">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="chartSvg"
         preserveAspectRatio="none"
+        onMouseLeave={() => setHoverIdx(null)}
+        onMouseMove={(evt) => {
+          const rect = evt.currentTarget.getBoundingClientRect();
+          const x = evt.clientX - rect.left;
+          const relX = (x / rect.width) * width;
+          const t = (relX - padX) / (width - padX * 2);
+          const idx = Math.round(t * (values.length - 1));
+          if (idx >= 0 && idx < values.length) setHoverIdx(idx);
+        }}
       >
+        {targetY != null && (
+          <line
+            x1={padX}
+            x2={width - padX}
+            y1={targetY}
+            y2={targetY}
+            className="chartGoal"
+          />
+        )}
         <path d={d} className="chartLine" />
+        {props.highlightIndex != null && highlightX != null && (
+          <circle
+            cx={highlightX}
+            cy={toY(values[props.highlightIndex])}
+            r={5}
+            className="chartMarker"
+          />
+        )}
+        {hoverIdx != null && values[hoverIdx] != null && (
+          <g>
+            <line
+              x1={toX(hoverIdx)}
+              x2={toX(hoverIdx)}
+              y1={padY}
+              y2={height - padY}
+              className="chartHoverLine"
+            />
+            <circle
+              cx={toX(hoverIdx)}
+              cy={toY(values[hoverIdx])}
+              r={4.5}
+              className="chartHoverDot"
+            />
+          </g>
+        )}
       </svg>
+      {hoverIdx != null && props.data[hoverIdx] && (
+        <div className="chartTooltip" style={{ left: `${toX(hoverIdx) / 9}%` }}>
+          <div className="chartTooltipTitle">
+            Mês {props.data[hoverIdx].month}
+          </div>
+          <div className="chartTooltipBody">
+            <span>Idade ~{props.data[hoverIdx].age.toFixed(1)}</span>
+            <span>
+              Saldo {fmt(values[hoverIdx])}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="chartLegend">
         <span>
           min: <b>{fmt(min)}</b>
@@ -738,6 +811,70 @@ export default function App() {
   ]);
 
   const faltaHoje = Math.max(0, targetToday - pvToday);
+
+  const scenarioLabel = useMemo(() => {
+    if (scenarioKey === "personalizado") return "Personalizado";
+    return SCENARIOS.find((s) => s.key === scenarioKey)?.label ?? "Base";
+  }, [scenarioKey]);
+
+  const summaryText = useMemo(() => {
+    const aporteText =
+      aporteNecessario == null
+        ? "—"
+        : `${brl2.format(aporteNecessario)} / mês`;
+    const idadeText =
+      idadeAlvo == null ? "—" : `${idadeAlvo.toFixed(1)} anos`;
+    return [
+      `Aporte sugerido: ${aporteText}`,
+      `Chega em: idade ${idadeText}`,
+      `Cenário: ${scenarioLabel} | Inflação: ${inflacaoAnualPct.toFixed(
+        1
+      )}% | Imposto: ${impostoEfetivoPct.toFixed(1)}%`,
+    ].join("\n");
+  }, [
+    aporteNecessario,
+    inflacaoAnualPct,
+    impostoEfetivoPct,
+    idadeAlvo,
+    scenarioLabel,
+  ]);
+
+  const copySummary = async () => {
+    try {
+      await navigator.clipboard.writeText(summaryText);
+    } catch (e) {
+      console.error("Clipboard error", e);
+    }
+  };
+
+  const displayTargetValue = useMemo(() => {
+    if (displayMode === "real") return targetToday;
+    return metaNominalEquivalente ?? null;
+  }, [displayMode, targetToday, metaNominalEquivalente]);
+
+  const metaHitIndex = useMemo(() => {
+    if (!projection || displayTargetValue == null) return null;
+    if (displayMode === "real") {
+      return projection.findIndex((p) => p.balanceReal >= displayTargetValue);
+    }
+    return projection.findIndex((p) => p.balanceNominal >= displayTargetValue);
+  }, [projection, displayTargetValue, displayMode]);
+
+  const milestones = useMemo(() => {
+    if (!projection || projection.length === 0) return [];
+    const thresholds = [100_000, 300_000, 500_000, 1_000_000];
+    return thresholds
+      .map((value) => {
+        const hit = projection.find((p) => p.balanceReal >= value);
+        if (!hit) return null;
+        return {
+          value,
+          month: hit.month,
+          age: hit.age,
+        };
+      })
+      .filter(Boolean) as { value: number; month: number; age: number }[];
+  }, [projection]);
 
   const exportCSV = () => {
     if (!projection) return;
@@ -1150,6 +1287,45 @@ export default function App() {
 
           <div className="divider" />
 
+          <div className="summaryCard">
+            <div>
+              <div className="summaryTitle">Resumo executivo</div>
+              <p className="summaryText">
+                Aporte sugerido: {" "}
+                <b>
+                  {aporteNecessario == null
+                    ? "—"
+                    : `${brl2.format(aporteNecessario)} / mês`}
+                </b>
+                <br />
+                Chega em: idade {" "}
+                <b>{idadeAlvo == null ? "—" : `${idadeAlvo.toFixed(1)}`}</b>
+                <br />
+                Cenário: {scenarioLabel} | Inflação: {inflacaoAnualPct.toFixed(1)}%
+                {" "}| Imposto: {impostoEfetivoPct.toFixed(1)}%
+              </p>
+            </div>
+            <button className="btn" onClick={copySummary}>
+              Copiar resumo
+            </button>
+          </div>
+
+          {milestones.length > 0 && (
+            <div className="timeline">
+              <div className="timelineHeader">Linha do tempo</div>
+              <div className="timelineGrid">
+                {milestones.map((m) => (
+                  <div key={m.value} className="timelineItem">
+                    <div className="timelineValue">{brl0.format(m.value)}</div>
+                    <div className="timelineMeta">
+                      Mês {m.month} · Idade ~{m.age.toFixed(1)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <h3>“Se eu aportar X, quando chego?”</h3>
           <div className="twoCols">
             <label>
@@ -1214,17 +1390,21 @@ export default function App() {
 
           <h3>Projeção</h3>
 
-          <div className="twoCols">
-            <label>
-              Exibir gráfico em
-              <select
-                value={displayMode}
-                onChange={(e) => setDisplayMode(e.target.value as DisplayMode)}
-              >
-                <option value="real">R$ de hoje (real)</option>
-                <option value="nominal">R$ nominal (com inflação)</option>
-              </select>
-            </label>
+          <div className="twoCols alignCenter">
+            <div className="toggleRow">
+              <span className="muted">Exibir</span>
+              <div className="chipGroup">
+                {["real", "nominal"].map((mode) => (
+                  <button
+                    key={mode}
+                    className={`chipBtn ${displayMode === mode ? "active" : ""}`}
+                    onClick={() => setDisplayMode(mode as DisplayMode)}
+                  >
+                    {mode === "real" ? "R$ de hoje (real)" : "R$ nominal"}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <button className="btn" onClick={exportCSV} disabled={!projection}>
               Exportar CSV
@@ -1233,7 +1413,10 @@ export default function App() {
 
           {projection && chartValues.length > 1 ? (
             <LineChart
-              points={chartValues}
+              data={projection}
+              displayMode={displayMode}
+              targetValue={displayTargetValue}
+              highlightIndex={metaHitIndex ?? undefined}
               height={190}
               formatY={(v) =>
                 displayMode === "real" ? brl0.format(v) : brl0.format(v)
