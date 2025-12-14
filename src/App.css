@@ -333,3 +333,97 @@ select:focus {
   color: var(--muted);
   font-size: 12px;
 }
+
+.assumptionsCard {
+  position: relative;
+}
+
+.assumptionBlock {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.assumptionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.calcFlow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.calcStepWrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calcStep {
+  border: 1px solid var(--line);
+  background: var(--card2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-width: 150px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.calcArrow {
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.infoTooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: var(--text);
+  cursor: default;
+}
+
+.infoTooltipBubble {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0b111d;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  width: min(280px, 70vw);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+}
+
+.infoTooltip:hover .infoTooltipBubble,
+.infoTooltip:focus-visible .infoTooltipBubble {
+  display: block;
+}
+
+.assumptionsList {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+}

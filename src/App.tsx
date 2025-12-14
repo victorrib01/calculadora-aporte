@@ -325,6 +325,21 @@ function pct(n: number, digits = 2) {
   return `${n.toFixed(digits)}%`;
 }
 
+function InfoTooltip(props: { text: string; label?: string }) {
+  const { text, label = "?" } = props;
+  return (
+    <span
+      className="infoTooltip"
+      role="tooltip"
+      aria-label={text}
+      tabIndex={0}
+    >
+      <span aria-hidden>{label}</span>
+      <span className="infoTooltipBubble">{text}</span>
+    </span>
+  );
+}
+
 function LineChart(props: {
   points: number[];
   height?: number;
@@ -1232,6 +1247,96 @@ export default function App() {
             Modelagem simplificada (taxas constantes). Na vida real:
             volatilidade, impostos por tipo/prazo, custos e aportes variáveis.
           </p>
+        </section>
+
+        <section className="card assumptionsCard">
+          <h2>Assumptions</h2>
+          <p className="muted">
+            Referências rápidas para entender de onde vêm os números e o que o
+            modelo simplifica.
+          </p>
+
+          <div className="assumptionBlock">
+            <div className="assumptionTitle">
+              Como calculamos
+              <InfoTooltip
+                text="Pipeline básico: pegamos a taxa bruta, descontamos um imposto efetivo constante, chegamos ao retorno nominal e, por fim, abatemos inflação para obter o retorno real."
+              />
+            </div>
+
+            <div className="calcFlow">
+              {[
+                {
+                  label: "Retorno bruto",
+                  tooltip: "Taxa nominal informada ou do cenário escolhido.",
+                },
+                {
+                  label: "Imposto efetivo",
+                  tooltip:
+                    "Alíquota simples aplicada sobre os ganhos mensais (aproximação).",
+                },
+                {
+                  label: "Retorno nominal",
+                  tooltip:
+                    "Resultado após imposto, ainda sujeito à inflação do período.",
+                },
+                {
+                  label: "Retorno real",
+                  tooltip:
+                    "Retorno nominal descontado da inflação para manter o poder de compra.",
+                },
+              ].map((step, idx) => (
+                <div className="calcStepWrapper" key={step.label}>
+                  <div className="calcStep">
+                    <span>{step.label}</span>
+                    <InfoTooltip text={step.tooltip} label="i" />
+                  </div>
+                  {idx < 3 && <span className="calcArrow">→</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="assumptionBlock">
+            <div className="assumptionTitle">
+              “Aporte reajustado”
+              <InfoTooltip
+                text="Quando você marca 'Sim', o valor de hoje é corrigido pela inflação ao longo dos meses para preservar o poder de compra. Em 'Não', o valor fica nominal fixo e vale menos em termos reais."
+              />
+            </div>
+            <p className="muted">
+              Opção "Sim" = aporte acompanha a inflação (valor real constante).
+              Opção "Não" = aporte nominal fixo, encolhendo em R$ de hoje.
+            </p>
+          </div>
+
+          <div className="assumptionBlock">
+            <div className="assumptionTitle">
+              Começo vs fim do mês
+              <InfoTooltip
+                text="Aporte no começo rende o mês inteiro. No fim, primeiro capitaliza o saldo existente e só depois entra o aporte."
+              />
+            </div>
+            <p className="muted">
+              No começo do mês, cada aporte ganha um mês a mais de juros. No fim
+              do mês, o aporte entra depois da rentabilidade mensal.
+            </p>
+          </div>
+
+          <div className="assumptionBlock">
+            <div className="assumptionTitle">
+              O que o modelo não cobre
+              <InfoTooltip
+                text="Usamos taxas constantes e uma alíquota efetiva única. Não há simulação de risco, variação de preços ou custos específicos."
+              />
+            </div>
+            <ul className="assumptionsList">
+              <li>Volatilidade e oscilações de rentabilidade.</li>
+              <li>IR real por produto, prazo ou come-cotas.</li>
+              <li>Taxas de administração/corretagem e outros custos.</li>
+              <li>Aportes variáveis, resgates ou mudanças de estratégia.</li>
+            </ul>
+          </div>
         </section>
       </div>
     </div>
