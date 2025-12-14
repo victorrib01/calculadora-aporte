@@ -10,6 +10,10 @@ com:
 - aporte no começo ou no fim do mês
 - comparação entre cenários
 - gráfico de projeção + exportação CSV
+- presets salvos no navegador + atalhos de metas (100k / 300k / 1M / 2M)
+- exibe a **meta nominal equivalente** no horizonte escolhido
+- usa sua **renda mensal informada** (ou a renda do benchmark) para calcular o
+  aporte médio do modelo
 
 > Observação: é um modelo educacional (taxas constantes). Na prática, rentabilidade oscila, impostos variam por produto/prazo e pode haver taxas/custos.
 
@@ -26,6 +30,27 @@ npm run dev
 npm run build
 npm run preview
 ```
+
+## Deploy na Vercel
+
+1. Instale as dependências e garanta que o build local funciona:
+
+   ```bash
+   npm install
+   npm run build
+   ```
+
+2. No painel da Vercel, clique em **New Project** e importe este repositório.
+3. Use as configurações padrão do Vite:
+   - **Framework Preset:** Vite
+   - **Build Command:** `npm run build`
+   - **Install Command:** `npm install`
+   - **Output Directory:** `dist`
+4. Conclua o deploy. Para publicar via CLI depois de configurado, use:
+
+   ```bash
+   vercel --prod
+   ```
 
 ## Stack
 

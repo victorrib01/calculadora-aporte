@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 type BenchmarkKey = "investidor" | "populacao";
@@ -6,6 +6,31 @@ type ScenarioKey = "pessimista" | "base" | "otimista" | "personalizado";
 type ContributionIndexation = "inflationAdjusted" | "fixedNominal";
 type ContributionTiming = "end" | "begin";
 type DisplayMode = "real" | "nominal";
+type PresetPayload = {
+  benchmarkKey: BenchmarkKey;
+  taxaAporteModeloPct: string;
+  rendaMensal: string;
+  carteiraAtual: string;
+  idadeAtual: string;
+  meta: string;
+  scenarioKey: ScenarioKey;
+  rendimentoMensalPctPersonalizado: string;
+  inflacaoAnualPct: number;
+  impostoEfetivoPct: number;
+  indexation: ContributionIndexation;
+  timing: ContributionTiming;
+  displayMode: DisplayMode;
+  usarTempoDoModelo: boolean;
+  idadeAlvoManual: string;
+  meuAporte: string;
+};
+
+type Preset = {
+  name: string;
+  data: PresetPayload;
+};
+
+const PRESET_STORAGE_KEY = "calcAporte.presets.v1";
 
 type Benchmark = {
   label: string;
@@ -41,6 +66,13 @@ const SCENARIOS: Scenario[] = [
   { key: "otimista", label: "Otimista", grossMonthlyPct: 0.8 },
 ];
 
+const GOAL_SHORTCUTS = [
+  { label: "100 mil", value: 100_000 },
+  { label: "300 mil", value: 300_000 },
+  { label: "1 milhão", value: 1_000_000 },
+  { label: "2 milhões", value: 2_000_000 },
+];
+
 const brl0 = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
@@ -64,6 +96,29 @@ function parseNumberBR(value: string): number {
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
+}
+
+function loadPresetsFromStorage(): Preset[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(PRESET_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p) => p?.name && p?.data);
+  } catch (e) {
+    console.warn("Erro ao ler presets do localStorage", e);
+    return [];
+  }
+}
+
+function persistPresets(list: Preset[]) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.warn("Erro ao salvar presets no localStorage", e);
+  }
 }
 
 function annualToMonthlyRate(annualRate: number): number {
@@ -325,6 +380,9 @@ export default function App() {
   // Benchmark
   const [benchmarkKey, setBenchmarkKey] = useState<BenchmarkKey>("investidor");
   const [taxaAporteModeloPct, setTaxaAporteModeloPct] = useState("10"); // % da renda
+  const [rendaMensal, setRendaMensal] = useState(
+    String(BENCHMARKS.investidor.income)
+  );
 
   // Inputs
   const [carteiraAtual, setCarteiraAtual] = useState("50000");
@@ -348,6 +406,14 @@ export default function App() {
   const [timing, setTiming] = useState<ContributionTiming>("end");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("real");
 
+  // Presets
+  const [presets, setPresets] = useState<Preset[]>(() => loadPresetsFromStorage());
+  const [presetName, setPresetName] = useState("");
+
+  useEffect(() => {
+    persistPresets(presets);
+  }, [presets]);
+
   // Idade alvo
   const [usarTempoDoModelo, setUsarTempoDoModelo] = useState(true);
   const [idadeAlvoManual, setIdadeAlvoManual] = useState("60");
@@ -366,6 +432,13 @@ export default function App() {
     [idadeAtual]
   );
   const targetToday = useMemo(() => Math.max(0, parseNumberBR(meta)), [meta]);
+
+  const rendaMensalNum = useMemo(
+    () => Math.max(0, parseNumberBR(rendaMensal)),
+    [rendaMensal]
+  );
+  const rendaReferencia = rendaMensalNum > 0 ? rendaMensalNum : b.income;
+  const usandoRendaDoBenchmark = rendaMensalNum <= 0;
 
   const inflAnnual = inflacaoAnualPct / 100;
   const inflM = useMemo(() => annualToMonthlyRate(inflAnnual), [inflAnnual]);
@@ -397,10 +470,84 @@ export default function App() {
     [grossMonthlyRate, taxRate]
   );
 
+  const presetPayload = useMemo<PresetPayload>(
+    () => ({
+      benchmarkKey,
+      taxaAporteModeloPct,
+      rendaMensal,
+      carteiraAtual,
+      idadeAtual,
+      meta,
+      scenarioKey,
+      rendimentoMensalPctPersonalizado,
+      inflacaoAnualPct,
+      impostoEfetivoPct,
+      indexation,
+      timing,
+      displayMode,
+      usarTempoDoModelo,
+      idadeAlvoManual,
+      meuAporte,
+    }),
+    [
+      benchmarkKey,
+      taxaAporteModeloPct,
+      rendaMensal,
+      carteiraAtual,
+      idadeAtual,
+      meta,
+      scenarioKey,
+      rendimentoMensalPctPersonalizado,
+      inflacaoAnualPct,
+      impostoEfetivoPct,
+      indexation,
+      timing,
+      displayMode,
+      usarTempoDoModelo,
+      idadeAlvoManual,
+      meuAporte,
+    ]
+  );
+
+  const savePreset = () => {
+    const name = presetName.trim();
+    if (!name) return;
+
+    setPresets((prev) => {
+      const filtered = prev.filter((p) => p.name !== name);
+      return [...filtered, { name, data: presetPayload }];
+    });
+    setPresetName("");
+  };
+
+  const deletePreset = (name: string) => {
+    setPresets((prev) => prev.filter((p) => p.name !== name));
+  };
+
+  const loadPreset = (preset: Preset) => {
+    const data = preset.data;
+    setBenchmarkKey(data.benchmarkKey);
+    setTaxaAporteModeloPct(data.taxaAporteModeloPct);
+    setRendaMensal(data.rendaMensal ?? "");
+    setCarteiraAtual(data.carteiraAtual);
+    setIdadeAtual(data.idadeAtual);
+    setMeta(data.meta);
+    setScenarioKey(data.scenarioKey);
+    setRendimentoMensalPctPersonalizado(data.rendimentoMensalPctPersonalizado);
+    setInflacaoAnualPct(data.inflacaoAnualPct);
+    setImpostoEfetivoPct(data.impostoEfetivoPct);
+    setIndexation(data.indexation);
+    setTiming(data.timing);
+    setDisplayMode(data.displayMode);
+    setUsarTempoDoModelo(data.usarTempoDoModelo);
+    setIdadeAlvoManual(data.idadeAlvoManual);
+    setMeuAporte(data.meuAporte);
+  };
+
   const modeloPmt = useMemo(() => {
     const pctIncome = Math.max(0, parseNumberBR(taxaAporteModeloPct)) / 100;
-    return b.income * pctIncome;
-  }, [b.income, taxaAporteModeloPct]);
+    return rendaReferencia * pctIncome;
+  }, [rendaReferencia, taxaAporteModeloPct]);
 
   // Tempo do modelo (meses) até a meta, com as mesmas regras (indexation/timing)
   const modeloMesesAteMeta = useMemo(() => {
@@ -443,6 +590,12 @@ export default function App() {
     const years = idadeAlvo - ageNow;
     return years > 0 ? Math.round(years * 12) : null;
   }, [idadeAlvo, ageNow]);
+
+  const metaNominalEquivalente = useMemo(() => {
+    if (mesesAteAlvo == null) return null;
+    const inflFactor = Math.pow(1 + inflM, mesesAteAlvo);
+    return targetToday * inflFactor;
+  }, [mesesAteAlvo, inflM, targetToday]);
 
   const aporteNecessario = useMemo(() => {
     if (mesesAteAlvo == null) return null;
@@ -647,13 +800,30 @@ export default function App() {
             </label>
 
             <label>
-              Taxa de poupança do benchmark (% da renda)
+              Taxa de poupança (% da renda)
               <input
                 value={taxaAporteModeloPct}
                 onChange={(e) => setTaxaAporteModeloPct(e.target.value)}
                 inputMode="decimal"
               />
-              <small>Define o “aporte médio do modelo”.</small>
+              <small>
+                Define o “aporte médio do modelo” a partir da sua renda (ou da
+                renda do benchmark, se não preencher abaixo).
+              </small>
+            </label>
+
+            <label>
+              Sua renda mensal (R$)
+              <input
+                value={rendaMensal}
+                onChange={(e) => setRendaMensal(e.target.value)}
+                inputMode="decimal"
+                placeholder="Usar renda do benchmark se vazio"
+              />
+              <small>
+                Se deixar em branco, usa a renda do benchmark selecionado
+                ({brl0.format(b.income)}).
+              </small>
             </label>
 
             <label>
@@ -714,6 +884,70 @@ export default function App() {
               />
               <small>Editar aqui muda para “Personalizado”.</small>
             </label>
+          </div>
+
+          <div className="tabsRow">
+            <div>
+              <h3>Metas rápidas</h3>
+              <div className="chipGroup">
+                {GOAL_SHORTCUTS.map((goal) => {
+                  const isActive = Math.abs(targetToday - goal.value) < 1;
+                  return (
+                    <button
+                      key={goal.value}
+                      className={`chipBtn ${isActive ? "active" : ""}`}
+                      onClick={() => setMeta(String(goal.value))}
+                    >
+                      {goal.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <small className="muted">
+                Preenche o campo de meta com valores mais comuns.
+              </small>
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          <h3>Presets (localStorage)</h3>
+          <div className="presetBar">
+            <input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="Ex: minha carteira, plano agressivo"
+            />
+            <button className="btn" onClick={savePreset}>
+              Salvar preset
+            </button>
+          </div>
+          <small className="muted">
+            Salva os parâmetros atuais no navegador para carregar depois.
+          </small>
+
+          <div className="presetList">
+            {presets.length === 0 && (
+              <div className="muted">Nenhum preset salvo ainda.</div>
+            )}
+            {presets.map((p) => (
+              <div className="presetItem" key={p.name}>
+                <div>
+                  <b>{p.name}</b>
+                </div>
+                <div className="presetActions">
+                  <button className="btn" onClick={() => loadPreset(p)}>
+                    Carregar
+                  </button>
+                  <button
+                    className="btn danger"
+                    onClick={() => deletePreset(p.name)}
+                  >
+                    Excluir
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="divider" />
@@ -847,7 +1081,22 @@ export default function App() {
             </div>
 
             <div className="kpiRow">
-              <span>Aporte médio do benchmark</span>
+              <span>Meta nominal equivalente no horizonte</span>
+              <b>
+                {metaNominalEquivalente == null
+                  ? "—"
+                  : brl0.format(metaNominalEquivalente)}
+              </b>
+            </div>
+
+            <div className="kpiRow">
+              <span>
+                Aporte médio
+                {" "}
+                {usandoRendaDoBenchmark
+                  ? "(renda do benchmark)"
+                  : "(sua renda)"}
+              </span>
               <b>{brl2.format(modeloPmt)} / mês</b>
             </div>
 
