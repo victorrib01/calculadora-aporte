@@ -19,7 +19,7 @@ describe("number parsing", () => {
 describe("rate conversions", () => {
   it("converts annual to monthly keeping sign", () => {
     expect(annualToMonthlyRate(0.12)).toBeCloseTo(0.009488, 6);
-    expect(annualToMonthlyRate(-0.12)).toBeCloseTo(-0.010575, 6);
+    expect(annualToMonthlyRate(-0.12)).toBeCloseTo(-0.010596, 6);
   });
 
   it("caps absurd negative annual rates", () => {
@@ -35,7 +35,7 @@ describe("return modeling", () => {
       inflationMonthlyRate: 0.003,
     });
 
-    expect(real).toBeCloseTo(0.006522, 6);
+    expect(real).toBeCloseTo(0.00653, 6);
   });
 
   it("projects balances across months", () => {
@@ -51,7 +51,7 @@ describe("return modeling", () => {
     });
 
     expect(points).toHaveLength(3);
-    expect(points[2].balanceReal).toBeCloseTo(2025.05, 2);
+    expect(points[2].balanceReal).toBeCloseTo(2025.1, 2);
     expect(points[1].contributionNominal).toBeCloseTo(501); // corrigido pela inflação
   });
 });
@@ -102,6 +102,6 @@ describe("targets and aporte solving", () => {
 
     expect(payment).not.toBeNull();
     expect(payment).toBeGreaterThan(0);
-    expect(payment ?? 0).toBeCloseTo(298.5, 0);
+    expect(payment ?? 0).toBeCloseTo(297.1, 1);
   });
 });

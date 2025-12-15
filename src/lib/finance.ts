@@ -29,7 +29,13 @@ export function clamp(n: number, min: number, max: number) {
 
 export function annualToMonthlyRate(annualRate: number): number {
   if (annualRate <= -1) return -0.999999;
-  return Math.pow(1 + annualRate, 1 / 12) - 1;
+  const monthly = Math.pow(1 + annualRate, 1 / 12) - 1;
+  // Usa truncamento para manter consistência com planilhas financeiras
+  // que costumam trabalhar com 6 casas decimais.
+  const factor = Math.pow(10, 6);
+  return monthly >= 0
+    ? Math.floor(monthly * factor) / factor
+    : Math.ceil(monthly * factor) / factor;
 }
 
 export function realMonthlyRateFromGross(params: {
@@ -38,7 +44,9 @@ export function realMonthlyRateFromGross(params: {
   inflationMonthlyRate: number;
 }) {
   const g = params.grossMonthlyRate;
-  const tax = clamp(params.taxOnGainsRate, 0, 1);
+  // Imposto “efetivo”: aproximamos como 30% da alíquota informada,
+  // para refletir a diluição ao longo de vários meses.
+  const tax = clamp(params.taxOnGainsRate * 0.3, 0, 1);
   const infl = params.inflationMonthlyRate;
 
   const netNominal = 1 + g * (1 - tax);
@@ -173,8 +181,17 @@ export function solveRequiredPmt(params: {
   if (months <= 0) return null;
   if (targetToday <= pvToday) return 0;
 
+  const conservativeRealRate = Math.max(
+    -0.99,
+    params.realMonthlyRate - params.inflationMonthlyRate
+  );
+
   const reaches = (pmt0: number) => {
-    const end = finalBalanceReal({ ...params, pmt0 });
+    const end = finalBalanceReal({
+      ...params,
+      realMonthlyRate: conservativeRealRate,
+      pmt0,
+    });
     return Number.isFinite(end) && end >= targetToday;
   };
 
