@@ -1,9 +1,10 @@
-import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import type { UserConfig } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
+const config: UserConfig = {
+  plugins: [react()] as unknown as UserConfig["plugins"],
   test: {
     globals: true,
     environment: "node",
@@ -11,4 +12,6 @@ export default defineConfig({
       provider: "v8",
     },
   },
-});
+};
+
+export default defineConfig(config);
